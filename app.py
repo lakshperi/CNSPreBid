@@ -382,46 +382,109 @@ def admin_page(conn, user: User) -> None:
 
     with tab_items:
         items = admin.list_items(conn, published_only=False)
-        summaries = []
-        for item in items:
-            s = bidding.item_summary(conn, item["item_id"])
-            summaries.append(
-                {
-                    "Item": item["item_id"],
-                    "Name": item["name"],
-                    "Status": item["status"],
-                    "Published": bool(item["published"]),
-                    "Initial": item["initial_bid_amount"],
-                    "Highest": s["highest_bid"],
-                    "Bids": s["bid_count"],
-                    "Closing at": item["closing_at"],
-                }
-            )
-        st.dataframe(pd.DataFrame(summaries), use_container_width=True, hide_index=True)
+        if not items:
+            st.info("No items yet. Sync photos from Google Drive first.")
+        else:
+            summaries = []
+            for item in items:
+                s = bidding.item_summary(conn, item["item_id"])
+                summaries.append(
+                    {
+                        "Item": item["item_id"],
+                        "Name": item["name"],
+                        "Status": item["status"],
+                        "Published": bool(item["published"]),
+                        "Initial": item["initial_bid_amount"],
+                        "Highest": s["highest_bid"],
+                        "Bids": s["bid_count"],
+                        "Closing at": item["closing_at"],
+                    }
+                )
+            st.dataframe(pd.DataFrame(summaries), use_container_width=True, hide_index=True)
 
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            item_id = st.selectbox("Item", [i["item_id"] for i in items], key="admin-item")
-            if st.button("Publish item"):
+            item_ids = [i["item_id"] for i in items]
+            item_id = st.selectbox("Edit item", item_ids, key="admin-item")
+            selected = next(i for i in items if i["item_id"] == item_id)
+            bid_count = bidding.bid_count(conn, item_id)
+
+            st.subheader("Edit catalog")
+            edit_name = st.text_input("Name", value=selected["name"], key=f"name-{item_id}")
+            edit_description = st.text_area(
+                "Description",
+                value=selected.get("description") or "",
+                key=f"desc-{item_id}",
+            )
+            edit_amount = st.number_input(
+                "Initial bid amount",
+                min_value=0.0,
+                value=float(selected["initial_bid_amount"] or 0.0),
+                step=5.0,
+                format="%.2f",
+                key=f"amount-{item_id}",
+                disabled=bid_count > 0,
+                help="Locked after the first bid is placed.",
+            )
+            edit_published = st.checkbox(
+                "Published (visible for bidding)",
+                value=bool(selected["published"]),
+                key=f"pub-{item_id}",
+            )
+            if bid_count:
+                st.caption(f"This item already has {bid_count} bid(s); initial amount is locked.")
+
+            if st.button("Save item changes", type="primary"):
                 try:
-                    admin.publish_item(conn, item_id)
-                    st.success(f"Published {item_id}")
+                    admin.update_item_details(
+                        conn,
+                        item_id,
+                        name=edit_name,
+                        description=edit_description,
+                        initial_bid_amount=float(edit_amount),
+                        published=bool(edit_published),
+                    )
+                    st.success(f"Updated {item_id}")
                     st.rerun()
                 except BidError as exc:
                     st.error(str(exc))
-            if st.button("Close bidding now", type="primary"):
-                admin.close_item(conn, item_id, administrator_id=user.google_sub)
-                st.success(f"Closed {item_id}")
-                st.rerun()
-        with c2:
-            hours = st.number_input("Close in N hours", min_value=1, value=24)
-            if st.button("Set scheduled close"):
-                closing = datetime.now(timezone.utc) + timedelta(hours=int(hours))
-                admin.set_schedule(conn, item_id, closing_at=closing.isoformat())
-                st.success(f"Scheduled {item_id} to close at {closing.isoformat()}")
-                st.rerun()
-        with c3:
-            st.caption("Open an item detail from Available Items to inspect identities.")
+
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                if st.button("Publish item"):
+                    try:
+                        admin.update_item_details(
+                            conn,
+                            item_id,
+                            initial_bid_amount=float(edit_amount),
+                            published=True,
+                        )
+                        st.success(f"Published {item_id}")
+                        st.rerun()
+                    except BidError as exc:
+                        st.error(str(exc))
+                if st.button("Unpublish item"):
+                    try:
+                        admin.unpublish_item(conn, item_id)
+                        st.success(f"Unpublished {item_id}")
+                        st.rerun()
+                    except BidError as exc:
+                        st.error(str(exc))
+            with c2:
+                if st.button("Close bidding now", type="primary"):
+                    admin.close_item(conn, item_id, administrator_id=user.google_sub)
+                    st.success(f"Closed {item_id}")
+                    st.rerun()
+                hours = st.number_input("Close in N hours", min_value=1, value=24)
+                if st.button("Set scheduled close"):
+                    closing = datetime.now(timezone.utc) + timedelta(hours=int(hours))
+                    admin.set_schedule(conn, item_id, closing_at=closing.isoformat())
+                    st.success(f"Scheduled {item_id} to close at {closing.isoformat()}")
+                    st.rerun()
+            with c3:
+                photo = Path(selected["photograph_ref"]) if selected.get("photograph_ref") else None
+                if photo and photo.exists():
+                    st.image(str(photo), use_container_width=True)
+                else:
+                    st.caption("No local photo preview available.")
 
     with tab_bids:
         all_items = admin.list_items(conn, published_only=True)

@@ -33,11 +33,96 @@ def publish_item(conn: sqlite3.Connection, item_id: str) -> None:
     ).fetchone()
     if item is None:
         raise BidError("Item not found.")
-    if not item["photograph_ref"] or item["initial_bid_amount"] is None:
-        raise BidError("Item missing photograph or initial bid amount.")
+    if not item["photograph_ref"]:
+        raise BidError("Item missing photograph.")
+    if item["initial_bid_amount"] is None or float(item["initial_bid_amount"]) <= 0:
+        raise BidError("Set an initial bid amount greater than 0 before publishing.")
     conn.execute(
         "UPDATE bid_items SET published = 1, status = CASE WHEN status = 'Upcoming' THEN 'Open' ELSE status END WHERE item_id = ?",
         (item_id,),
+    )
+
+
+def unpublish_item(conn: sqlite3.Connection, item_id: str) -> None:
+    item = conn.execute(
+        "SELECT item_id, status FROM bid_items WHERE item_id = ?",
+        (item_id,),
+    ).fetchone()
+    if item is None:
+        raise BidError("Item not found.")
+    if item["status"] == "Closed":
+        raise BidError("Closed items cannot be unpublished.")
+    bid_count = conn.execute(
+        "SELECT COUNT(*) AS c FROM bids WHERE item_id = ?",
+        (item_id,),
+    ).fetchone()["c"]
+    if bid_count:
+        raise BidError("Cannot unpublish an item that already has bids.")
+    conn.execute(
+        "UPDATE bid_items SET published = 0, status = 'Upcoming' WHERE item_id = ?",
+        (item_id,),
+    )
+
+
+def update_item_details(
+    conn: sqlite3.Connection,
+    item_id: str,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    initial_bid_amount: float | None = None,
+    published: bool | None = None,
+) -> None:
+    """Admin catalog edits. Initial amount can change only when there are no bids."""
+    item = conn.execute(
+        "SELECT * FROM bid_items WHERE item_id = ?",
+        (item_id,),
+    ).fetchone()
+    if item is None:
+        raise BidError("Item not found.")
+
+    bid_count = conn.execute(
+        "SELECT COUNT(*) AS c FROM bids WHERE item_id = ?",
+        (item_id,),
+    ).fetchone()["c"]
+
+    new_name = name if name is not None else item["name"]
+    new_description = description if description is not None else (item["description"] or "")
+    new_amount = (
+        float(initial_bid_amount)
+        if initial_bid_amount is not None
+        else float(item["initial_bid_amount"])
+    )
+    if new_amount < 0:
+        raise BidError("Initial bid amount cannot be negative.")
+    if initial_bid_amount is not None and bid_count and abs(new_amount - float(item["initial_bid_amount"])) > 1e-9:
+        raise BidError("Initial bid amount cannot change after bids exist.")
+
+    new_published = int(item["published"] if published is None else published)
+    new_status = item["status"]
+    if published is True:
+        if not item["photograph_ref"]:
+            raise BidError("Item missing photograph.")
+        if new_amount <= 0:
+            raise BidError("Set an initial bid amount greater than 0 before publishing.")
+        new_published = 1
+        if new_status == "Upcoming":
+            new_status = "Open"
+    elif published is False:
+        if item["status"] == "Closed":
+            raise BidError("Closed items cannot be unpublished.")
+        if bid_count:
+            raise BidError("Cannot unpublish an item that already has bids.")
+        new_published = 0
+        new_status = "Upcoming"
+
+    conn.execute(
+        """
+        UPDATE bid_items
+        SET name = ?, description = ?, initial_bid_amount = ?, published = ?, status = ?
+        WHERE item_id = ?
+        """,
+        (new_name.strip() or item["name"], new_description, new_amount, new_published, new_status, item_id),
     )
 
 

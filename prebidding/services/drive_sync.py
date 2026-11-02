@@ -286,15 +286,16 @@ def google_access_token_from_user(user_obj: Any) -> str:
     return str(token)
 
 
-def resolve_access_token(user_obj: Any | None = None) -> str:
-    """Prefer dedicated Drive OAuth refresh token; fall back to SSO token."""
+def resolve_access_token(user_obj: Any | None = None, secrets: Any | None = None) -> str:
+    """Prefer Drive secrets/local refresh token; fall back to SSO token."""
     try:
-        from prebidding.services.drive_oauth import DriveAuthError, get_valid_access_token
+        from prebidding.services.drive_oauth import get_valid_access_token
 
-        return get_valid_access_token()
+        return get_valid_access_token(secrets)
     except Exception:
         if user_obj is None:
             raise DriveSyncError(
-                "Google Drive is not connected. Click Connect Google Drive first."
+                "Google Drive is not connected. Add [drive] refresh_token in Secrets "
+                "or Connect Google Drive locally."
             )
         return google_access_token_from_user(user_obj)

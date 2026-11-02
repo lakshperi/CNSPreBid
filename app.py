@@ -442,19 +442,19 @@ def admin_page(conn, user: User) -> None:
         from prebidding.services import drive_oauth, drive_sync
 
         st.subheader("Google Drive photo folder")
-        st.warning(
-            "Setting `drive_folder_id` only stores the folder reference. "
-            "Photos pull only after **Connect Google Drive & Sync** succeeds."
-        )
-        st.caption(
-            "Name files like `ITEM-101.jpg` (filename stem = item id). "
-            "If Google shows redirect_uri_mismatch, add these Authorized redirect URIs "
-            "on your OAuth web client: `http://127.0.0.1:8090/` and `http://localhost:8090/`."
-        )
-
-        connected = drive_oauth.drive_connected()
+        on_cloud = drive_oauth.running_on_streamlit_cloud()
+        connected = drive_oauth.drive_connected(st.secrets)
         st.markdown(
             f"**Drive connection:** {'Connected ✅' if connected else 'Not connected ❌'}"
+        )
+        if on_cloud and not connected:
+            st.error(
+                "Streamlit Cloud cannot use local Connect Google Drive. "
+                "Add a `[drive]` refresh_token block in App Secrets, then Reboot, then Sync now."
+            )
+        st.caption(
+            "Folder ID `15XIK7dkLBgYNNqRG0Wn7HYUU9Wc1Nes4` is used when set in secrets/settings. "
+            "Filename stem becomes the item id."
         )
 
         current_folder = drive_sync.get_setting(conn, "drive_folder_id") or ""
@@ -483,22 +483,25 @@ def admin_page(conn, user: User) -> None:
                 "Connect Google Drive & Sync",
                 type="primary",
                 use_container_width=True,
+                disabled=on_cloud,
+                help="Local only. On Cloud, put [drive] refresh_token in Secrets.",
             )
         with c3:
             sync_only = st.button(
                 "Sync now",
                 use_container_width=True,
                 disabled=not connected,
+                type="primary" if on_cloud else "secondary",
             )
 
-        if connected and st.button("Disconnect Drive"):
+        if connected and not on_cloud and st.button("Disconnect Drive"):
             drive_oauth.clear_credentials()
             st.rerun()
 
         def _run_sync(folder_value: str) -> None:
             folder_id = drive_sync.extract_folder_id(folder_value)
             drive_sync.set_setting(conn, "drive_folder_id", folder_id)
-            token = drive_oauth.get_valid_access_token()
+            token = drive_oauth.get_valid_access_token(st.secrets)
             meta = drive_oauth.probe_folder(token, folder_id)
             with st.spinner(f"Downloading photos from '{meta.get('name', folder_id)}'..."):
                 result = drive_sync.sync_photos_from_drive(
@@ -516,12 +519,9 @@ def admin_page(conn, user: User) -> None:
                     "Upload `.jpg/.png` files named like `ITEM-101.jpg`."
                 )
 
-        if connect_and_sync:
+        if connect_and_sync and not on_cloud:
             try:
-                with st.spinner(
-                    "Opening browser for Google Drive consent "
-                    "(add redirect URI http://localhost:8090/ if prompted)..."
-                ):
+                with st.spinner("Opening browser for Google Drive consent..."):
                     drive_oauth.connect_drive_interactive(st.secrets)
                 _run_sync(folder_input)
                 st.rerun()

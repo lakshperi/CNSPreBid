@@ -119,7 +119,7 @@ def save_credentials(creds: Credentials) -> None:
     TOKEN_PATH.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def load_credentials() -> Credentials | None:
+def load_credentials_from_file() -> Credentials | None:
     if not TOKEN_PATH.exists():
         return None
     data = json.loads(TOKEN_PATH.read_text(encoding="utf-8"))
@@ -131,8 +131,57 @@ def load_credentials() -> Credentials | None:
         token_uri=data.get("token_uri", "https://oauth2.googleapis.com/token"),
         client_id=data.get("client_id"),
         client_secret=data.get("client_secret"),
-        scopes=data.get("scopes"),
+        scopes=data.get("scopes") or DRIVE_SCOPES,
     )
+
+
+def load_credentials_from_secrets(secrets: Any) -> Credentials | None:
+    """Cloud-friendly Drive auth: store refresh token in Streamlit secrets [drive]."""
+    try:
+        drive = secrets["drive"]
+    except Exception:
+        return None
+
+    def _get(key: str, default: str = "") -> str:
+        try:
+            value = drive[key]
+        except Exception:
+            value = getattr(drive, key, default)
+        return str(value or default).strip()
+
+    refresh_token = _get("refresh_token")
+    if not refresh_token:
+        return None
+
+    # Fall back to [auth] client credentials when not duplicated under [drive].
+    client_id = _get("client_id")
+    client_secret = _get("client_secret")
+    if not client_id or not client_secret:
+        try:
+            auth = secrets["auth"]
+            client_id = client_id or str(auth["client_id"]).strip()
+            client_secret = client_secret or str(auth["client_secret"]).strip()
+        except Exception:
+            pass
+    if not client_id or not client_secret:
+        return None
+
+    return Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri=_get("token_uri", "https://oauth2.googleapis.com/token"),
+        client_id=client_id,
+        client_secret=client_secret,
+        scopes=DRIVE_SCOPES,
+    )
+
+
+def load_credentials(secrets: Any | None = None) -> Credentials | None:
+    if secrets is not None:
+        from_secrets = load_credentials_from_secrets(secrets)
+        if from_secrets is not None:
+            return from_secrets
+    return load_credentials_from_file()
 
 
 def clear_credentials() -> None:
@@ -140,18 +189,22 @@ def clear_credentials() -> None:
         TOKEN_PATH.unlink()
 
 
-def get_valid_access_token() -> str:
-    creds = load_credentials()
+def get_valid_access_token(secrets: Any | None = None) -> str:
+    creds = load_credentials(secrets)
     if creds is None:
         raise DriveAuthError(
-            "Google Drive is not connected. Click Connect Google Drive & Sync first."
+            "Google Drive is not connected. On Streamlit Cloud, add a [drive] "
+            "refresh_token in Secrets. Locally, use Connect Google Drive & Sync."
         )
     if not creds.valid:
         if creds.refresh_token:
             creds.refresh(Request())
-            save_credentials(creds)
+            # Persist refreshed access token only for local file-based creds.
+            if secrets is None or load_credentials_from_secrets(secrets) is None:
+                save_credentials(creds)
         else:
-            clear_credentials()
+            if secrets is None:
+                clear_credentials()
             raise DriveAuthError(
                 "Drive token expired and no refresh token is stored. Reconnect Google Drive."
             )
@@ -160,8 +213,14 @@ def get_valid_access_token() -> str:
     return creds.token
 
 
-def drive_connected() -> bool:
-    return load_credentials() is not None
+def drive_connected(secrets: Any | None = None) -> bool:
+    return load_credentials(secrets) is not None
+
+
+def running_on_streamlit_cloud() -> bool:
+    import os
+
+    return bool(os.environ.get("STREAMLIT_SHARING_MODE") or os.environ.get("HOSTNAME", "").endswith("streamlit.app"))
 
 
 def probe_folder(access_token: str, folder_id: str) -> dict[str, Any]:

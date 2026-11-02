@@ -8,6 +8,7 @@ data/drive_token.json
 data/photos/
 .DS_Store
 .streamlit/secrets.toml
+.streamlit/drive_secrets_fragment.toml
 client_secret*.json
 *.egg-info/
 .pytest_cache/

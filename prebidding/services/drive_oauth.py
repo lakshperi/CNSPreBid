@@ -220,7 +220,44 @@ def drive_connected(secrets: Any | None = None) -> bool:
 def running_on_streamlit_cloud() -> bool:
     import os
 
-    return bool(os.environ.get("STREAMLIT_SHARING_MODE") or os.environ.get("HOSTNAME", "").endswith("streamlit.app"))
+    if os.environ.get("STREAMLIT_SHARING_MODE"):
+        return True
+    if os.environ.get("STREAMLIT_CLOUD") or os.environ.get("STREAMLIT_SHARING"):
+        return True
+    hostname = os.environ.get("HOSTNAME", "").lower()
+    if "streamlit" in hostname:
+        return True
+    # Community Cloud apps typically run as user appuser.
+    if os.environ.get("USER") == "appuser":
+        return True
+    return False
+
+
+def drive_secrets_status(secrets: Any) -> dict[str, Any]:
+    """Non-sensitive diagnostics for the Sync UI."""
+    has_drive_section = False
+    has_refresh = False
+    try:
+        drive = secrets["drive"]
+        has_drive_section = True
+        try:
+            has_refresh = bool(str(drive["refresh_token"]).strip())
+        except Exception:
+            has_refresh = bool(str(getattr(drive, "refresh_token", "")).strip())
+    except Exception:
+        pass
+    folder = ""
+    try:
+        folder = str(secrets["prebidding"].get("drive_folder_id", "") or "")
+    except Exception:
+        folder = ""
+    return {
+        "has_drive_section": has_drive_section,
+        "has_refresh_token": has_refresh,
+        "folder_id": folder,
+        "connected": drive_connected(secrets),
+        "on_cloud": running_on_streamlit_cloud(),
+    }
 
 
 def probe_folder(access_token: str, folder_id: str) -> dict[str, Any]:

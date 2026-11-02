@@ -24,11 +24,50 @@ st.set_page_config(
 
 @st.cache_resource
 def get_connection():
-    seed(force=False)
     conn = connect()
     init_db(conn)
     auth.ensure_demo_users(conn)
+    # Always keep a local seed catalog as fallback.
+    seed(force=False)
     return conn
+
+
+@st.cache_resource
+def boot_sync_drive_photos() -> dict:
+    """Pull Drive folder once per server boot when secrets include a refresh token."""
+    from prebidding.services import drive_oauth, drive_sync
+
+    conn = get_connection()
+    try:
+        if not drive_oauth.drive_connected(st.secrets):
+            return {"ok": False, "error": "No [drive] refresh_token in secrets"}
+        folder = ""
+        try:
+            folder = str(st.secrets["prebidding"].get("drive_folder_id", "") or "")
+        except Exception:
+            folder = ""
+        folder = folder or drive_sync.get_setting(conn, "drive_folder_id") or ""
+        if not folder:
+            return {"ok": False, "error": "drive_folder_id missing in secrets/settings"}
+        token = drive_oauth.get_valid_access_token(st.secrets)
+        folder_id = drive_sync.extract_folder_id(folder)
+        drive_sync.set_setting(conn, "drive_folder_id", folder_id)
+        result = drive_sync.sync_photos_from_drive(
+            conn,
+            access_token=token,
+            folder_id=folder_id,
+            auto_publish=True,
+        )
+        return {
+            "ok": True,
+            "folder_id": folder_id,
+            "imported": result.imported,
+            "updated": result.updated,
+            "rejected": result.rejected,
+            "errors": result.errors[:5],
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)}
 
 
 def _sso_enabled() -> bool:
@@ -442,20 +481,34 @@ def admin_page(conn, user: User) -> None:
         from prebidding.services import drive_oauth, drive_sync
 
         st.subheader("Google Drive photo folder")
-        on_cloud = drive_oauth.running_on_streamlit_cloud()
-        connected = drive_oauth.drive_connected(st.secrets)
+        status = drive_oauth.drive_secrets_status(st.secrets)
+        on_cloud = status["on_cloud"]
+        connected = status["connected"]
+        boot = boot_sync_drive_photos()
         st.markdown(
             f"**Drive connection:** {'Connected ✅' if connected else 'Not connected ❌'}"
         )
-        if on_cloud and not connected:
-            st.error(
-                "Streamlit Cloud cannot use local Connect Google Drive. "
-                "Add a `[drive]` refresh_token block in App Secrets, then Reboot, then Sync now."
-            )
         st.caption(
-            "Folder ID `15XIK7dkLBgYNNqRG0Wn7HYUU9Wc1Nes4` is used when set in secrets/settings. "
-            "Filename stem becomes the item id."
+            f"Secrets [drive] section: {'yes' if status['has_drive_section'] else 'NO'} · "
+            f"refresh_token: {'yes' if status['has_refresh_token'] else 'NO'} · "
+            f"folder secret: `{status['folder_id'] or 'missing'}`"
         )
+        if boot.get("ok"):
+            st.success(
+                f"Boot sync: folder `{boot.get('folder_id')}` · "
+                f"new {boot.get('imported', 0)}, updated {boot.get('updated', 0)}, "
+                f"rejected {boot.get('rejected', 0)}"
+            )
+            for err in boot.get("errors") or []:
+                st.warning(err)
+        else:
+            st.warning(f"Boot sync did not run: {boot.get('error', 'unknown')}")
+        if not connected:
+            st.error(
+                "Add a complete `[drive]` block (refresh_token + client_id + client_secret) "
+                "in App ⋮ → Settings → Secrets, Save, then Reboot."
+            )
+        st.caption("Filename stem becomes the item id (e.g. `ITEM-101.jpg`).")
 
         current_folder = drive_sync.get_setting(conn, "drive_folder_id") or ""
         try:
@@ -490,7 +543,6 @@ def admin_page(conn, user: User) -> None:
             sync_only = st.button(
                 "Sync now",
                 use_container_width=True,
-                disabled=not connected,
                 type="primary" if on_cloud else "secondary",
             )
 
@@ -561,6 +613,8 @@ def admin_page(conn, user: User) -> None:
 
 def main() -> None:
     conn = get_connection()
+    # Ensure Drive catalog is pulled once per boot (Cloud + local).
+    boot_sync_drive_photos()
     user = require_login(conn)
     if user is None:
         login_page(conn)

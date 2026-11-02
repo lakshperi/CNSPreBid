@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+data/prebidding.db
+data/prebidding.db-*
+data/drive_token.json
+data/photos/
+.DS_Store
+.streamlit/secrets.toml
+client_secret*.json
+*.egg-info/
+.pytest_cache/
+*.jpg
+*.jpeg
+*.png
+!docs/**/*.png

@@ -1,0 +1,6 @@
+streamlit[auth]>=1.66.0
+pandas>=2.2.0
+Pillow>=10.0.0
+google-auth>=2.0
+google-auth-oauthlib>=1.2
+httpx>=0.24

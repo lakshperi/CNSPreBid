@@ -114,20 +114,20 @@ def login_page(conn) -> None:
                 _demo_login_form(conn)
         return
 
+    missing = auth.missing_google_sso_keys(st.secrets)
     st.warning(
-        "Google SSO is not configured yet. Add `.streamlit/secrets.toml` from "
-        "`secrets.toml.example`, then restart Streamlit."
+        "Google SSO is not configured for this deployment. "
+        "On Streamlit Cloud: App menu (⋮) → Settings → Secrets → paste TOML → Save → Reboot."
     )
-    with st.expander("Google Cloud setup checklist", expanded=True):
+    st.error(f"Missing or placeholder secret keys: {', '.join(missing)}")
+    with st.expander("What to paste into Streamlit Cloud Secrets", expanded=True):
         st.markdown(
             """
-1. Create an OAuth **Web application** client in [Google Auth Platform](https://console.cloud.google.com/auth/clients).
-2. Add authorized redirect URI: `http://localhost:8501/oauth2callback`
-3. Copy Client ID and Client secret into `.streamlit/secrets.toml`
-4. Set a strong random `cookie_secret`
-5. Put admin Google emails in `[prebidding].admin_emails`
-6. While the OAuth app is in **Testing**, add those emails as test users under Audience
-7. Restart: `PYTHONPATH=. streamlit run app.py`
+1. Open your app → **⋮ → Settings → Secrets**
+2. Paste the full TOML block (must include `[auth]` and a real `redirect_uri`)
+3. Set `redirect_uri` to `https://<your-app>.streamlit.app/oauth2callback`
+4. Click **Save**, then **Reboot app**
+5. In Google Cloud OAuth client, add that same callback URL under Authorized redirect URIs
             """
         )
     st.subheader("Demo login (until Google SSO is configured)")

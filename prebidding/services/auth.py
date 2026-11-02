@@ -123,32 +123,64 @@ def provision_google_user(
     return upsert_user(conn, user)
 
 
+_AUTH_REQUIRED_KEYS = (
+    "redirect_uri",
+    "cookie_secret",
+    "client_id",
+    "client_secret",
+    "server_metadata_url",
+)
+_PLACEHOLDER_VALUES = {
+    "xxx",
+    "changeme",
+    "replace-me",
+    "your_google_oauth_client_secret",
+    "your-app.streamlit.app",
+}
+
+
+def _auth_section(secrets: Any) -> Any | None:
+    try:
+        return secrets["auth"]
+    except Exception:
+        pass
+    try:
+        # Some hosts expose root keys via attribute access only.
+        return getattr(secrets, "auth", None)
+    except Exception:
+        return None
+
+
+def _secret_get(section: Any, key: str) -> str:
+    if section is None:
+        return ""
+    value = None
+    try:
+        value = section[key]
+    except Exception:
+        value = getattr(section, key, None)
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def missing_google_sso_keys(secrets: Any) -> list[str]:
+    """Return missing/placeholder [auth] keys (empty list means SSO looks configured)."""
+    auth_cfg = _auth_section(secrets)
+    if auth_cfg is None:
+        return ["auth"]
+    missing: list[str] = []
+    for key in _AUTH_REQUIRED_KEYS:
+        value = _secret_get(auth_cfg, key)
+        lowered = value.lower()
+        if not value or lowered in _PLACEHOLDER_VALUES or "your-app" in lowered:
+            missing.append(key)
+    return missing
+
+
 def google_sso_configured(secrets: Any) -> bool:
     """Return True when Streamlit [auth] secrets look ready for Google OIDC."""
-    try:
-        auth_cfg = secrets["auth"]
-    except Exception:
-        return False
-
-    def _get(key: str) -> str:
-        try:
-            value = auth_cfg[key]
-        except Exception:
-            return ""
-        return str(value).strip()
-
-    required = (
-        "redirect_uri",
-        "cookie_secret",
-        "client_id",
-        "client_secret",
-        "server_metadata_url",
-    )
-    for key in required:
-        value = _get(key)
-        if not value or value.lower() in {"xxx", "changeme", "replace-me"}:
-            return False
-    return True
+    return not missing_google_sso_keys(secrets)
 
 
 def admin_emails_from_secrets(secrets: Any) -> list[str]:

@@ -76,9 +76,21 @@ Used when Google SSO secrets are missing, or when `allow_demo_login = true`.
 - Admin publish, schedule/close, correct/cancel with audit, winners export
 - Seed sync stand-in for Google Drive / Sheets
 
-## Streamlit Cloud
+## Streamlit Community Cloud
 
-1. Push this repo to GitHub.
-2. Create an app at https://share.streamlit.io pointing at `app.py`.
-3. Python version 3.11+; dependencies from `requirements.txt`.
-4. Persistent disk is limited on free Cloud — SQLite resets on redeploy unless you attach external storage.
+1. Push this repo to GitHub (private is fine).
+2. Go to [share.streamlit.io](https://share.streamlit.io) → **New app** → select the repo, branch `main`, file `app.py`.
+3. In the app **Settings → Secrets**, paste a production `secrets.toml` (from `.streamlit/secrets.toml.example`).
+4. Set cloud redirect URI to your app URL, for example:
+
+```toml
+[auth]
+redirect_uri = "https://YOUR-APP-NAME.streamlit.app/oauth2callback"
+```
+
+5. In Google Cloud OAuth client, add the same `redirect_uri` under **Authorized redirect URIs**.
+6. Put your Google account in `[prebidding].admin_emails`.
+
+Notes:
+- Free Cloud storage is ephemeral — SQLite data can reset on restart. Prefer a hosted DB later for production.
+- **Connect Google Drive & Sync** uses a local loopback OAuth listener (`127.0.0.1:8090`) and works on your laptop. On Streamlit Cloud, sync photos locally (or add a service-account-based sync later).

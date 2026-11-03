@@ -29,8 +29,9 @@ def _next_sequence(conn: sqlite3.Connection) -> int:
     return int(row["value"])
 
 
-def _valid_bids_sql() -> str:
-    return "status IN ('Accepted', 'Corrected')"
+def _valid_bids_sql(table_alias: str = "") -> str:
+    col = f"{table_alias}.status" if table_alias else "status"
+    return f"{col} IN ('Accepted', 'Corrected')"
 
 
 def current_highest(conn: sqlite3.Connection, item_id: str) -> float | None:
@@ -235,7 +236,7 @@ def my_bids(conn: sqlite3.Connection, user_id: str) -> list[MyBidRow]:
                MAX(b.recorded_at) AS last_bid_at
         FROM bids b
         JOIN bid_items i ON i.item_id = b.item_id
-        WHERE b.user_id = ? AND {_valid_bids_sql()}
+        WHERE b.user_id = ? AND {_valid_bids_sql('b')}
         GROUP BY b.item_id
         ORDER BY last_bid_at DESC
         """,

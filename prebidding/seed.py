@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from prebidding.constants import DEFAULT_INITIAL_BID_CAD
 from prebidding.db import DATA_DIR, connect, init_db
 from prebidding.services.admin import record_sync, upsert_item
 from prebidding.services.auth import ensure_demo_users
@@ -16,35 +17,35 @@ SAMPLE_ITEMS = [
         "item_id": "ITEM-101",
         "name": "Vintage Leather Armchair",
         "description": "Mid-century armchair in cognac leather.",
-        "initial_bid_amount": 150.0,
+        "initial_bid_amount": DEFAULT_INITIAL_BID_CAD,
         "color": (120, 72, 48),
     },
     {
         "item_id": "ITEM-102",
         "name": "Signed Sports Memorabilia",
         "description": "Framed jersey with certificate of authenticity.",
-        "initial_bid_amount": 200.0,
+        "initial_bid_amount": DEFAULT_INITIAL_BID_CAD,
         "color": (32, 74, 135),
     },
     {
         "item_id": "ITEM-103",
         "name": "Weekend Cabin Getaway",
         "description": "Two-night stay voucher (lodging only).",
-        "initial_bid_amount": 300.0,
+        "initial_bid_amount": DEFAULT_INITIAL_BID_CAD,
         "color": (46, 110, 72),
     },
     {
         "item_id": "ITEM-104",
         "name": "Chef's Dinner for Four",
         "description": "Private tasting menu experience.",
-        "initial_bid_amount": 250.0,
+        "initial_bid_amount": DEFAULT_INITIAL_BID_CAD,
         "color": (140, 50, 60),
     },
     {
         "item_id": "ITEM-105",
         "name": "Art Print Collection",
         "description": "Set of three limited-edition prints.",
-        "initial_bid_amount": 100.0,
+        "initial_bid_amount": DEFAULT_INITIAL_BID_CAD,
         "color": (90, 90, 120),
         "status": "Upcoming",
         "published": False,

@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 import httpx
 
+from prebidding.constants import DEFAULT_INITIAL_BID_CAD
 from prebidding.db import DATA_DIR
 from prebidding.services.admin import record_sync, upsert_item
 
@@ -182,11 +183,14 @@ def sync_photos_from_drive(
     *,
     access_token: str,
     folder_id: str,
-    default_initial_bid: float = 1.0,
+    default_initial_bid: float | None = None,
     auto_publish: bool = True,
 ) -> DriveSyncResult:
     if not access_token:
         raise DriveSyncError("Missing Google access token.")
+
+    if default_initial_bid is None:
+        default_initial_bid = DEFAULT_INITIAL_BID_CAD
 
     folder_id = extract_folder_id(folder_id)
     files = list_image_files(access_token, folder_id)

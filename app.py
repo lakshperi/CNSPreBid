@@ -29,6 +29,10 @@ def get_connection():
     auth.ensure_demo_users(conn)
     # Always keep a local seed catalog as fallback.
     seed(force=False)
+    # Apply CA$100 opening price to all items once (new Drive imports also default to 100).
+    from prebidding.db import ensure_default_initial_bids
+
+    ensure_default_initial_bids(conn)
     return conn
 
 
@@ -193,7 +197,7 @@ def sidebar(user: User | None) -> str:
 def money(value: float | None) -> str:
     if value is None:
         return "—"
-    return f"${value:,.2f}"
+    return f"CA${value:,.2f}"
 
 
 def available_items(conn, user: User | None) -> None:

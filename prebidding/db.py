@@ -154,6 +154,29 @@ def _migrate_bids_allow_rebids(conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA foreign_keys = ON")
 
 
+def ensure_default_initial_bids(conn: sqlite3.Connection) -> None:
+    """One-shot: set every catalog item's opening price to the standard CAD default."""
+    from prebidding.constants import DEFAULT_INITIAL_BID_CAD
+
+    # Apply once so later admin edits are preserved across reboots.
+    flag = conn.execute(
+        "SELECT value FROM app_settings WHERE key = 'default_initial_bid_cad_applied'"
+    ).fetchone()
+    if flag and str(flag["value"]) == str(DEFAULT_INITIAL_BID_CAD):
+        return
+    conn.execute(
+        "UPDATE bid_items SET initial_bid_amount = ?",
+        (float(DEFAULT_INITIAL_BID_CAD),),
+    )
+    conn.execute(
+        """
+        INSERT INTO app_settings(key, value) VALUES ('default_initial_bid_cad_applied', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
+        (str(DEFAULT_INITIAL_BID_CAD),),
+    )
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     conn.execute(

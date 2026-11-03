@@ -132,21 +132,17 @@ def _demo_login_form(conn) -> None:
         st.rerun()
 
 
-def login_page(conn) -> None:
-    st.title("CNS Pre-Bidding")
-    st.markdown(
-        "Centralized pre-bidding platform — transparent amounts, protected identities, "
-        "auditable outcomes."
-    )
-
+def sign_in_panel(conn, *, heading: str, detail: str, key: str = "sign-in-google") -> None:
+    """Prompt Google SSO (or demo login) without blocking catalog browsing."""
+    st.subheader(heading)
+    st.write(detail)
     if _sso_enabled():
-        st.subheader("Sign in with Google")
-        st.write("Authenticate with your Google account to browse items and place bids.")
         st.button(
             "Log in with Google",
             type="primary",
             use_container_width=True,
             on_click=st.login,
+            key=key,
         )
         if _demo_enabled():
             with st.expander("Demo login (local testing)"):
@@ -158,30 +154,30 @@ def login_page(conn) -> None:
         "Google SSO is not configured for this deployment. "
         "On Streamlit Cloud: App menu (⋮) → Settings → Secrets → paste TOML → Save → Reboot."
     )
-    st.error(f"Missing or placeholder secret keys: {', '.join(missing)}")
-    with st.expander("What to paste into Streamlit Cloud Secrets", expanded=True):
-        st.markdown(
-            """
-1. Open your app → **⋮ → Settings → Secrets**
-2. Paste the full TOML block (must include `[auth]` and a real `redirect_uri`)
-3. Set `redirect_uri` to `https://<your-app>.streamlit.app/oauth2callback`
-4. Click **Save**, then **Reboot app**
-5. In Google Cloud OAuth client, add that same callback URL under Authorized redirect URIs
-            """
-        )
+    if missing:
+        st.error(f"Missing or placeholder secret keys: {', '.join(missing)}")
     st.subheader("Demo login (until Google SSO is configured)")
     _demo_login_form(conn)
 
 
-def sidebar(user: User) -> str:
+def sidebar(user: User | None) -> str:
     with st.sidebar:
+        if user is None:
+            st.markdown("**Guest**")
+            st.caption("Browse items freely. Sign in only to bid.")
+            pages = ["Available Items", "Sign in"]
+            page = st.radio("Navigate", pages, key="nav-guest")
+            st.divider()
+            st.caption("Auth: Google OIDC · Store: SQLite")
+            return page
+
         st.markdown(f"**{user.display_name}**")
         provider = st.session_state.get("auth_provider", "demo")
         st.caption(f"{user.email} · {user.role} · via {provider}")
         pages = ["Available Items", "My Bids"]
         if user.is_admin:
             pages.append("Administrator")
-        page = st.radio("Navigate", pages)
+        page = st.radio("Navigate", pages, key="nav-user")
         if st.button("Sign out"):
             st.session_state.pop("user", None)
             st.session_state.pop("auth_provider", None)
@@ -200,12 +196,15 @@ def money(value: float | None) -> str:
     return f"${value:,.2f}"
 
 
-def available_items(conn, user: User) -> None:
+def available_items(conn, user: User | None) -> None:
     st.title("Available Items")
+    if user is None:
+        st.caption("You can browse all items as a guest. Sign in with Google only when you place a bid.")
     bidding.apply_due_closures(conn)
     # Admins also see unpublished Drive imports so photos are visible immediately.
-    items = admin.list_items(conn, published_only=not user.is_admin)
-    if user.is_admin:
+    is_admin = bool(user and user.is_admin)
+    items = admin.list_items(conn, published_only=not is_admin)
+    if is_admin:
         unpublished = [i for i in items if not i["published"]]
         if unpublished:
             st.info(
@@ -242,7 +241,7 @@ def available_items(conn, user: User) -> None:
                 st.rerun()
 
 
-def item_detail(conn, user: User) -> None:
+def item_detail(conn, user: User | None) -> None:
     item_id = st.session_state.get("selected_item")
     if not item_id:
         st.session_state["view"] = "list"
@@ -272,7 +271,7 @@ def item_detail(conn, user: User) -> None:
             f"**Minimum acceptable:** {money(summary['minimum_acceptable'])}  \n"
             f"**Bid count:** {summary['bid_count']}"
         )
-        if summary["status"] == "Closed" and summary.get("winner") and user.is_admin:
+        if summary["status"] == "Closed" and summary.get("winner") and user and user.is_admin:
             w = summary["winner"]
             st.success(
                 f"Winner: {w['display_name']} ({w['email']}) at {money(w['amount'])}"
@@ -282,7 +281,18 @@ def item_detail(conn, user: User) -> None:
 
     with right:
         st.subheader("Place a bid")
-        if user.is_admin:
+        if user is None:
+            if summary["status"] != "Open":
+                st.info(f"Item is {summary['status']}; bidding is disabled.")
+            else:
+                st.info("Sign in with Google to place a bid on this item.")
+                sign_in_panel(
+                    conn,
+                    heading="Sign in to bid",
+                    detail="Your Google account is only required when submitting a bid.",
+                    key="sign-in-to-bid",
+                )
+        elif user.is_admin:
             st.warning("Administrators cannot place bids in this release.")
         elif summary["status"] != "Open":
             st.info(f"Item is {summary['status']}; bidding is disabled.")
@@ -312,7 +322,7 @@ def item_detail(conn, user: User) -> None:
 
         st.subheader("Bid history")
         st.caption("Bidder identities are hidden from non-administrators.")
-        if user.is_admin:
+        if user and user.is_admin:
             rows = bidding.list_admin_bids(conn, item_id)
             df = pd.DataFrame(rows)
             if not df.empty:
@@ -730,9 +740,6 @@ def main() -> None:
     # Ensure Drive catalog is pulled once per boot (Cloud + local).
     boot_sync_drive_photos()
     user = require_login(conn)
-    if user is None:
-        login_page(conn)
-        return
 
     if "view" not in st.session_state:
         st.session_state["view"] = "list"
@@ -743,11 +750,31 @@ def main() -> None:
             item_detail(conn, user)
         else:
             available_items(conn, user)
+    elif page == "Sign in":
+        st.title("CNS Pre-Bidding")
+        sign_in_panel(
+            conn,
+            heading="Sign in with Google",
+            detail="Browse items without an account. Sign in to place bids, view My Bids, or administer.",
+        )
     elif page == "My Bids":
-        st.session_state["view"] = "list"
-        my_bids_page(conn, user)
+        if user is None:
+            sign_in_panel(
+                conn,
+                heading="Sign in required",
+                detail="Sign in with Google to view your bids.",
+            )
+        else:
+            st.session_state["view"] = "list"
+            my_bids_page(conn, user)
     elif page == "Administrator":
-        if not user.is_admin:
+        if user is None:
+            sign_in_panel(
+                conn,
+                heading="Sign in required",
+                detail="Sign in with a Google admin account to open the Administrator dashboard.",
+            )
+        elif not user.is_admin:
             st.error("Administrator role required.")
         else:
             st.session_state["view"] = "list"

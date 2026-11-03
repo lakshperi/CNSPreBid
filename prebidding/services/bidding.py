@@ -48,6 +48,7 @@ def current_highest(conn: sqlite3.Connection, item_id: str) -> float | None:
 
 
 def minimum_acceptable(conn: sqlite3.Connection, item_id: str) -> float:
+    """Lowest amount that can take/keep the lead: initial, or just above current highest."""
     item = conn.execute(
         "SELECT initial_bid_amount FROM bid_items WHERE item_id = ?",
         (item_id,),
@@ -57,7 +58,8 @@ def minimum_acceptable(conn: sqlite3.Connection, item_id: str) -> float:
     highest = current_highest(conn, item_id)
     if highest is None:
         return float(item["initial_bid_amount"])
-    return float(highest)
+    # Must strictly exceed the current highest to overbid.
+    return round(float(highest) + 0.01, 2)
 
 
 def bid_count(conn: sqlite3.Connection, item_id: str) -> int:
@@ -149,12 +151,12 @@ def submit_bid(
         if item["status"] != "Open":
             raise BidError(f"Item is {item['status']}; bidding is not allowed.")
 
-        existing = conn.execute(
-            "SELECT bid_id FROM bids WHERE item_id = ? AND user_id = ?",
-            (item_id, user_id),
-        ).fetchone()
-        if existing:
-            raise BidError("You have already submitted a bid for this item.")
+        leader = leading_bid(conn, item_id)
+        if leader is not None and leader["user_id"] == user_id:
+            raise BidError(
+                "You already hold the highest bid. "
+                "You can bid again after someone outbids you."
+            )
 
         minimum = minimum_acceptable(conn, item_id)
         if amount < minimum:
@@ -223,14 +225,19 @@ class MyBidRow:
 
 
 def my_bids(conn: sqlite3.Connection, user_id: str) -> list[MyBidRow]:
+    """One row per item using the user's highest valid bid."""
     rows = conn.execute(
-        """
-        SELECT b.item_id, i.name AS item_name, b.amount AS my_bid, i.status AS item_status,
-               b.status AS bid_status, b.recorded_sequence
+        f"""
+        SELECT b.item_id,
+               i.name AS item_name,
+               i.status AS item_status,
+               MAX(b.amount) AS my_bid,
+               MAX(b.recorded_at) AS last_bid_at
         FROM bids b
         JOIN bid_items i ON i.item_id = b.item_id
-        WHERE b.user_id = ?
-        ORDER BY b.recorded_at DESC
+        WHERE b.user_id = ? AND {_valid_bids_sql()}
+        GROUP BY b.item_id
+        ORDER BY last_bid_at DESC
         """,
         (user_id,),
     ).fetchall()
@@ -240,9 +247,7 @@ def my_bids(conn: sqlite3.Connection, user_id: str) -> list[MyBidRow]:
         if highest is None:
             highest = 0.0
         leader = leading_bid(conn, row["item_id"])
-        if row["bid_status"] == "Cancelled":
-            label = "Cancelled"
-        elif leader and leader["user_id"] == user_id:
+        if leader and leader["user_id"] == user_id:
             label = "Winning" if row["item_status"] == "Closed" else "Highest"
         else:
             label = "Outbid"

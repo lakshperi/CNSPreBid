@@ -65,9 +65,11 @@ CREATE TABLE IF NOT EXISTS bids (
     amount REAL NOT NULL CHECK (amount >= 0),
     recorded_sequence INTEGER NOT NULL,
     recorded_at TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('Accepted', 'Corrected', 'Cancelled')),
-    UNIQUE (item_id, user_id)
+    status TEXT NOT NULL CHECK (status IN ('Accepted', 'Corrected', 'Cancelled'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_bids_item ON bids(item_id);
+CREATE INDEX IF NOT EXISTS idx_bids_item_user ON bids(item_id, user_id);
 
 CREATE TABLE IF NOT EXISTS bid_audits (
     audit_id TEXT PRIMARY KEY,
@@ -113,8 +115,48 @@ CREATE TABLE IF NOT EXISTS app_settings (
 """
 
 
+def _migrate_bids_allow_rebids(conn: sqlite3.Connection) -> None:
+    """Drop legacy UNIQUE(item_id, user_id) so outbid users can place another bid."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='bids'"
+    ).fetchone()
+    if row is None:
+        return
+    table_sql = row["sql"] if isinstance(row, sqlite3.Row) else row[0]
+    if not table_sql or "UNIQUE (item_id, user_id)" not in table_sql:
+        return
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE bids_rebids_mig (
+                bid_id TEXT PRIMARY KEY,
+                item_id TEXT NOT NULL REFERENCES bid_items(item_id),
+                user_id TEXT NOT NULL REFERENCES users(google_sub),
+                amount REAL NOT NULL CHECK (amount >= 0),
+                recorded_sequence INTEGER NOT NULL,
+                recorded_at TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('Accepted', 'Corrected', 'Cancelled'))
+            );
+            INSERT INTO bids_rebids_mig (
+                bid_id, item_id, user_id, amount, recorded_sequence, recorded_at, status
+            )
+            SELECT bid_id, item_id, user_id, amount, recorded_sequence, recorded_at, status
+            FROM bids;
+            DROP TABLE bids;
+            ALTER TABLE bids_rebids_mig RENAME TO bids;
+            CREATE INDEX IF NOT EXISTS idx_bids_item ON bids(item_id);
+            CREATE INDEX IF NOT EXISTS idx_bids_item_user ON bids(item_id, user_id);
+            """
+        )
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     conn.execute(
         "INSERT OR IGNORE INTO sequence_counters(name, value) VALUES ('bid_sequence', 0)"
     )
+    _migrate_bids_allow_rebids(conn)

@@ -296,7 +296,17 @@ def item_detail(conn, user: User | None) -> None:
             st.warning("Administrators cannot place bids in this release.")
         elif summary["status"] != "Open":
             st.info(f"Item is {summary['status']}; bidding is disabled.")
+        elif summary.get("leader_user_id") == user.google_sub:
+            st.success(
+                "You hold the highest bid. "
+                "If someone outbids you, you can place a higher bid here."
+            )
         else:
+            if summary.get("leader_user_id"):
+                st.caption(
+                    "You can place another bid if you were outbid — "
+                    "enter an amount at or above the minimum."
+                )
             amount = st.number_input(
                 "Your bid amount",
                 min_value=float(summary["minimum_acceptable"]),

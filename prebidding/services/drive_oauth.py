@@ -198,7 +198,23 @@ def get_valid_access_token(secrets: Any | None = None) -> str:
         )
     if not creds.valid:
         if creds.refresh_token:
-            creds.refresh(Request())
+            try:
+                creds.refresh(Request())
+            except Exception as exc:  # noqa: BLE001
+                detail = str(exc)
+                if "invalid_grant" in detail.lower():
+                    raise DriveAuthError(
+                        "Drive refresh_token is expired or revoked. "
+                        "On your laptop run: "
+                        "`PYTHONPATH=. .venv/bin/python scripts/mint_drive_refresh_token.py` "
+                        "then paste the new refresh_token into Cloud Secrets [drive] and Reboot."
+                    ) from exc
+                if "invalid_client" in detail.lower():
+                    raise DriveAuthError(
+                        "Drive client_secret is invalid. Use the same NEW client_secret "
+                        "under both [auth] and [drive] in Secrets."
+                    ) from exc
+                raise DriveAuthError(f"Drive token refresh failed: {detail}") from exc
             # Persist refreshed access token only for local file-based creds.
             if secrets is None or load_credentials_from_secrets(secrets) is None:
                 save_credentials(creds)

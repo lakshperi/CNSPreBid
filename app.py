@@ -646,6 +646,17 @@ def admin_page(conn, user: User) -> None:
                 "Add a complete `[drive]` block (refresh_token + client_id + client_secret) "
                 "in App ⋮ → Settings → Secrets, Save, then Reboot."
             )
+        with st.expander("If photos are not syncing", expanded=not boot.get("ok")):
+            st.markdown(
+                """
+1. `[auth].client_secret` and `[drive].client_secret` must be the **same NEW** secret.
+2. If you rotated the client secret, mint a **new** Drive `refresh_token` on your laptop:
+   `PYTHONPATH=. .venv/bin/python scripts/mint_drive_refresh_token.py`
+3. Paste the printed `[drive]` values into Cloud Secrets → Save → **Reboot**.
+4. Come back here and click **Sync now**.
+5. Image filenames become item ids (e.g. `Baby Items - Silver - Feeding Bowl.jpg`).
+                """
+            )
         st.caption("Filename stem becomes the item id (e.g. `ITEM-101.jpg`).")
 
         current_folder = drive_sync.get_setting(conn, "drive_folder_id") or ""
@@ -723,6 +734,7 @@ def admin_page(conn, user: User) -> None:
         if sync_only:
             try:
                 _run_sync(folder_input)
+                boot_sync_drive_photos.clear()
                 st.rerun()
             except (drive_sync.DriveSyncError, drive_oauth.DriveAuthError) as exc:
                 st.error(str(exc))

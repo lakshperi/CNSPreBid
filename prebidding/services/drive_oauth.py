@@ -94,6 +94,14 @@ def connect_drive_interactive(secrets: Any) -> Credentials:
             f"Could not start local OAuth listener on port {port}. Details: {exc}"
         ) from exc
     except Exception as exc:  # noqa: BLE001
+        detail = str(exc)
+        if "invalid_client" in detail.lower():
+            raise DriveAuthError(
+                "Drive authorization failed: client_secret is invalid. "
+                "Update `[auth].client_secret` (and `[drive].client_secret`) in "
+                ".streamlit/secrets.toml to the NEW secret from Google Cloud Console, "
+                f"then re-run. Details: {exc}"
+            ) from exc
         needed = f"http://127.0.0.1:{port}/ and http://localhost:{port}/"
         raise DriveAuthError(
             "Drive authorization failed (often redirect_uri_mismatch). "
